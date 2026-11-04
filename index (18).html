@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Assay Lab Barcode Scanner</title>
+  <script src="https://unpkg.com/html5-qrcode" defer></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: Arial, sans-serif; background: #f4f6f8; color: #222;
+    }
+    .container { max-width: 700px; margin: auto; padding: 20px; }
+    .header { text-align: center; margin-bottom: 18px; }
+    .header img {
+      max-width: 100%; height: auto; max-height: 90px;
+      display: block; margin: 0 auto 12px auto;
+    }
+    h1 {
+      text-align: center; margin: 0 0 8px 0;
+      font-size: 1.6rem; color: #1a237e;
+    }
+    .card {
+      background: white; border-radius: 14px; padding: 18px;
+      box-shadow: 0 2px 10px rgba(0,0,0,.08); margin-bottom: 16px;
+    }
+    button {
+      border: 0; border-radius: 9px; padding: 12px 16px; cursor: pointer;
+      font-size: 15px; margin: 4px;
+    }
+    .primary { background: #1769aa; color: white; width: 100%; font-size: 17px; }
+    .secondary { background: #e8eef3; }
+    .danger { background: #d9534f; color: white; }
+    .success { background: #2e7d32; color: white; }
+    .info { background: #455a64; color: white; }
+    #reader { width: 100%; display: none; margin-top: 12px; }
+    .status {
+      text-align: center; padding: 10px 12px; margin-top: 8px;
+      border-radius: 8px; font-weight: 500; color: #555; background: #f0f3f5;
+      transition: background 0.2s, color 0.2s;
+    }
+    .status.success-msg { background: #e8f5e9; color: #2e7d32; }
+    .status.duplicate-msg {
+      background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; font-weight: bold;
+    }
+    .status.error-msg { background: #fff3e0; color: #e65100; }
+    .count { font-size: 18px; font-weight: bold; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 9px 6px; border-bottom: 1px solid #ddd; text-align: left; }
+    th { background: #f0f3f5; }
+    .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+    .actions button { flex: 1 1 auto; min-width: 110px; }
+    .empty { text-align: center; color: #888; padding: 20px; }
+    .count-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; flex-wrap: wrap; margin-bottom: 10px;
+    }
+    .count-row .count { margin-bottom: 0; }
+    tr.duplicate-row { background: #ffebee; }
+    tr.duplicate-row td:nth-child(2) { color: #c62828; font-weight: bold; }
+    .sheet-note {
+      text-align: center; font-size: 13px; color: #666; margin-top: 10px;
+    }
+
+    .field-row {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 12px; flex-wrap: wrap;
+    }
+    .field-row label {
+      font-weight: 600; color: #444; font-size: 14px;
+      white-space: nowrap; min-width: 72px;
+    }
+    .field-row input, .field-row select {
+      flex: 1; min-width: 140px; padding: 10px 12px;
+      border: 1px solid #cfd8dc; border-radius: 9px;
+      font-size: 15px; outline: none; background: white;
+      transition: border-color 0.2s;
+    }
+    .field-row input:focus, .field-row select:focus {
+      border-color: #1769aa;
+      box-shadow: 0 0 0 2px rgba(23, 105, 170, 0.15);
+    }
+    .field-row input.field-empty { border-color: #ef9a9a; }
+
+    .block-wrap {
+      flex: 1; min-width: 140px; display: flex; gap: 6px; align-items: center;
+    }
+    .block-wrap input { flex: 1; min-width: 0; }
+    .block-hint {
+      font-size: 12px; color: #666; margin: -6px 0 12px 82px;
+    }
+
+    .block-info {
+      background: #e3f2fd; border: 1px solid #90caf9; border-radius: 9px;
+      padding: 10px 14px; margin-bottom: 12px; font-size: 14px; color: #1565c0;
+      display: none;
+    }
+    .block-info strong { color: #0d47a1; font-size: 15px; }
+
+    .mode-row {
+      display: flex; align-items: center; justify-content: center;
+      gap: 10px; margin-bottom: 14px; flex-wrap: wrap;
+    }
+    .mode-label { font-weight: 600; color: #444; font-size: 14px; }
+    .mode-toggle {
+      display: flex; background: #e8eef3; border-radius: 10px;
+      overflow: hidden; border: 1px solid #cfd8dc;
+    }
+    .mode-toggle button {
+      margin: 0; border-radius: 0; padding: 10px 18px;
+      font-size: 14px; font-weight: 600; background: transparent; color: #555;
+      transition: background 0.2s, color 0.2s;
+    }
+    .mode-toggle button.active { background: #1769aa; color: white; }
+    .help-btn {
+      width: 32px; height: 32px; border-radius: 50%; background: #1769aa;
+      color: white; font-size: 18px; font-weight: bold;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0; margin: 0; line-height: 1; flex-shrink: 0;
+    }
+    .help-btn:hover { background: #0d47a1; }
+
+    .modal-overlay {
+      display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.45); z-index: 1000;
+      align-items: center; justify-content: center; padding: 20px;
+    }
+    .modal-overlay.show { display: flex; }
+    .modal-box {
+      background: white; border-radius: 14px; padding: 22px 20px;
+      max-width: 360px; width: 100%; box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+    }
+    .modal-box h3 {
+      margin: 0 0 14px 0; color: #1a237e; font-size: 1.15rem; text-align: center;
+    }
+    .modal-box p {
+      margin: 0 0 12px 0; font-size: 14px; line-height: 1.5; color: #333;
+    }
+    .modal-close {
+      display: block; width: 100%; margin-top: 16px; background: #1769aa;
+      color: white; border: 0; border-radius: 9px; padding: 11px;
+      font-size: 15px; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <img src="logo.png" alt="Assay Laboratory Logo">
+    <h1>Assay Lab Barcode Scanner</h1>
+  </div>
+
+  <div class="card">
+    <div class="field-row">
+      <label for="picInput">PIC:</label>
+      <input type="text" id="picInput" placeholder="Nama PIC / petugas" autocomplete="name" />
+    </div>
+
+    <div class="field-row">
+      <label for="blockSelect">No Block:</label>
+      <div class="block-wrap">
+        <select id="blockSelect">
+          <option value="">— Pilih No Block —</option>
+        </select>
+        <button type="button" id="removeBlockBtn" class="secondary" title="Hapus No Block dari daftar (kolom H sheet)" style="margin:0;padding:10px 12px;white-space:nowrap;flex-shrink:0;">Hapus List</button>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <label for="newBlockInput">Tambah:</label>
+      <div class="block-wrap">
+        <input type="text" id="newBlockInput" placeholder="Ketik No Block baru" autocomplete="off" />
+        <button type="button" id="addBlockBtn" class="info" style="margin:0;padding:10px 12px;white-space:nowrap;flex-shrink:0;">Tambah No Block</button>
+      </div>
+    </div>
+    <p class="block-hint">Pilih No Block di dropdown untuk scan · gunakan <strong>Tambah No Block</strong> untuk menambah daftar (tersimpan di sheet kolom H)</p>
+
+    <div id="blockInfo" class="block-info">
+      Current Sample ID: <strong id="currentSampleId">-</strong>
+    </div>
+
+    <div class="mode-row">
+      <span class="mode-label">Mode:</span>
+      <div class="mode-toggle">
+        <button type="button" id="modeManual" class="active">Manual</button>
+        <button type="button" id="modeAuto">Auto</button>
+      </div>
+      <button type="button" id="helpBtn" class="help-btn" title="Bantuan" aria-label="Bantuan">?</button>
+    </div>
+
+    <button id="startBtn" class="primary">Press to scan</button>
+    <div id="reader"></div>
+    <div id="status" class="status">Ready to scan</div>
+  </div>
+
+  <div class="card">
+    <div class="count-row">
+      <div class="count">Scanned (<span id="activeBlockLabel">-</span>): <span id="count">0</span></div>
+      <button type="button" id="sortBtn" class="secondary" title="Urutkan barcode A→Z">SORT</button>
+    </div>
+    <table>
+      <thead>
+        <tr><th>No.</th><th>Barcode</th><th>PIC</th><th>No Block</th><th></th></tr>
+      </thead>
+      <tbody id="barcodeTable"></tbody>
+    </table>
+    <div id="empty" class="empty">Pilih / isi No Block terlebih dahulu.</div>
+
+    <div class="actions">
+      <button id="exportBtn" class="success">EXPORT EXCEL</button>
+      <button id="clearBtn" class="danger">CLEAR ALL</button>
+    </div>
+    <p class="sheet-note">Scan otomatis terkirim ke Google Sheets · Export = 1 file Excel (1 sheet per No Block)</p>
+  </div>
+</div>
+
+<!-- Help modal -->
+<div id="helpModal" class="modal-overlay">
+  <div class="modal-box">
+    <h3>Mode Scan & No Block</h3>
+    <p><strong>Manual</strong> = Tekan tombol scan lagi untuk scan berikutnya.</p>
+    <p><strong>Auto</strong> = Kamera terbuka lagi otomatis setelah scan.</p>
+    <p><strong>No Block</strong> = Pilih dari dropdown. Untuk menambah, ketik di kolom "Tambah" lalu tekan tombol <strong>Tambah No Block</strong> (tersimpan di sheet kolom H, bisa dipakai device lain).</p>
+    <button type="button" class="modal-close" id="helpClose">Tutup</button>
+  </div>
+</div>
+
+<script>
+  // ===== GOOGLE SHEETS WEB APP URL =====
+  const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx6QZ_NPCJnX4NmrGAOW-qa-_HZgtU7MnfKkZs-YQHAdKWtoPm8FCVX1mDYG46KWmnN/exec";
+
+  let scanner = null;
+  let scanning = false;
+  let scanMode = localStorage.getItem("scanMode") || "manual";
+  let items = JSON.parse(localStorage.getItem("barcodeItems") || "[]");
+  let lastScannedCode = null;
+  let lastScanTime = 0;
+  const DEBOUNCE_MS = 1500;
+  let autoRestartPending = false;
+  let isProcessingScan = false;
+  let picName = localStorage.getItem("picName") || "";
+  let blockNo = localStorage.getItem("blockNo") || "";
+  // Daftar No Block yang dikenal (dari sheet kolom H + lokal)
+  let knownBlocks = JSON.parse(localStorage.getItem("knownBlocks") || "[]");
+
+  function setStatus(message, type = "") {
+    const el = document.getElementById("status");
+    el.textContent = message;
+    el.className = "status" + (type ? " " + type : "");
+  }
+
+  function getPicName() {
+    const input = document.getElementById("picInput");
+    return (input ? input.value : picName).trim();
+  }
+
+  function getBlockNo() {
+    const sel = document.getElementById("blockSelect");
+    return (sel ? sel.value : blockNo).trim();
+  }
+
+  function savePicName() {
+    picName = getPicName();
+    localStorage.setItem("picName", picName);
+    const input = document.getElementById("picInput");
+    if (input) input.classList.toggle("field-empty", !picName);
+  }
+
+  function saveBlockNo() {
+    blockNo = getBlockNo();
+    localStorage.setItem("blockNo", blockNo);
+    updateBlockInfo();
+    render();
+  }
+
+  function setSelectedBlock(name) {
+    const sel = document.getElementById("blockSelect");
+    if (sel) {
+      // Pastikan option ada
+      let found = false;
+      for (let i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === name) { found = true; break; }
+      }
+      if (!found && name) {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        sel.appendChild(opt);
+      }
+      sel.value = name || "";
+    }
+    saveBlockNo();
+  }
+
+  function save() {
+    localStorage.setItem("barcodeItems", JSON.stringify(items));
+    render();
+  }
+
+  /** Apakah string waktu berasal dari hari ini (lokal device) */
+  function isTodayTime(timeStr) {
+    if (!timeStr) return false;
+    const s = String(timeStr).trim();
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth() + 1;
+    const d = now.getDate();
+
+    // Format umum dari sheet / toLocaleString: "4/11/2026, 03.37.39" atau "4/11/2026, 3:37:39"
+    // juga "11/4/2026..." tergantung locale
+    const datePart = s.split(",")[0].trim();
+    const parts = datePart.split(/[\/\-\.]/).map(p => parseInt(p, 10)).filter(n => !isNaN(n));
+    if (parts.length < 3) {
+      // coba Date parse native
+      const dt = new Date(s);
+      if (!isNaN(dt.getTime())) {
+        return dt.getFullYear() === y && dt.getMonth() + 1 === m && dt.getDate() === d;
+      }
+      return false;
+    }
+    let day, month, year;
+    // Jika bagian ketiga 4 digit = tahun → d/m/Y atau m/d/Y
+    if (parts[2] >= 1000) {
+      year = parts[2];
+      // Heuristik: jika parts[0] > 12 → pasti day/month/year
+      if (parts[0] > 12) {
+        day = parts[0];
+        month = parts[1];
+      } else if (parts[1] > 12) {
+        month = parts[0];
+        day = parts[1];
+      } else {
+        // Ambigu: anggap d/m/Y (format Indonesia)
+        day = parts[0];
+        month = parts[1];
+      }
+    } else if (parts[0] >= 1000) {
+      // Y-m-d
+      year = parts[0];
+      month = parts[1];
+      day = parts[2];
+    } else {
+      return false;
+    }
+    return year === y && month === m && day === d;
+  }
+
+  function getBlockItems() {
+    const block = getBlockNo();
+    if (!block) return [];
+    // Hanya tampilkan scan HARI INI untuk No Block ini
+    return items.filter(x => (x.blockNo || "") === block && isTodayTime(x.time));
+  }
+
+  function isDuplicate(barcode) {
+    const block = getBlockNo();
+    // Duplikat hanya dihitung dalam No Block yang sama & HARI INI
+    return items.some(x =>
+      x.barcode === barcode &&
+      (x.blockNo || "") === block &&
+      isTodayTime(x.time)
+    );
+  }
+
+  function naturalCompare(a, b) {
+    return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+  }
+
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, c =>
+      ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;" }[c])
+    );
+  }
+
+  function render() {
+    const tbody = document.getElementById("barcodeTable");
+    const empty = document.getElementById("empty");
+    const blockItems = getBlockItems();
+    const blockLabel = getBlockNo() || "—";
+    document.getElementById("count").textContent = blockItems.length;
+    const labelEl = document.getElementById("activeBlockLabel");
+    if (labelEl) labelEl.textContent = blockLabel;
+    tbody.innerHTML = "";
+
+    empty.style.display = blockItems.length ? "none" : "block";
+    if (!getBlockNo()) {
+      empty.textContent = "Pilih / isi No Block terlebih dahulu.";
+    } else {
+      empty.textContent = "Belum ada barcode untuk No Block \"" + blockLabel + "\".";
+    }
+
+    const counts = {};
+    blockItems.forEach(item => {
+      counts[item.barcode] = (counts[item.barcode] || 0) + 1;
+    });
+
+    blockItems.forEach((item, index) => {
+      const globalIndex = items.indexOf(item);
+      const tr = document.createElement("tr");
+      const isDup = counts[item.barcode] > 1;
+      if (isDup) tr.classList.add("duplicate-row");
+      tr.innerHTML = `
+        <td>${index + 1}</td>
+        <td><strong>${escapeHtml(item.barcode)}</strong>${isDup ? ' <span style="color:#c62828;font-size:0.85em;">(duplicate)</span>' : ''}</td>
+        <td>${escapeHtml(item.pic || "-")}</td>
+        <td>${escapeHtml(item.blockNo || "-")}</td>
+        <td><button class="secondary" onclick="removeItem(${globalIndex})">Delete</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  window.removeItem = function(index) {
+    items.splice(index, 1);
+    save();
+    updateBlockInfo();
+  };
+
+  function updateBlockInfo() {
+    const infoEl = document.getElementById("blockInfo");
+    const sampleEl = document.getElementById("currentSampleId");
+    const block = getBlockNo();
+    if (!block) {
+      if (infoEl) infoEl.style.display = "none";
+      return;
+    }
+    const blockItems = getBlockItems();
+    if (blockItems.length) {
+      const last = blockItems[blockItems.length - 1];
+      if (infoEl) infoEl.style.display = "block";
+      if (sampleEl) sampleEl.textContent = last.barcode || "-";
+    } else {
+      if (infoEl) infoEl.style.display = "none";
+    }
+  }
+
+  function updateBlockSelect() {
+    const sel = document.getElementById("blockSelect");
+    if (!sel) return;
+    const current = getBlockNo() || blockNo;
+    const set = new Set(knownBlocks);
+    items.forEach(it => { if (it.blockNo) set.add(it.blockNo); });
+    if (current) set.add(current);
+    knownBlocks = Array.from(set).filter(Boolean).sort(naturalCompare);
+    localStorage.setItem("knownBlocks", JSON.stringify(knownBlocks));
+
+    sel.innerHTML = '<option value="">— Pilih No Block —</option>';
+    knownBlocks.forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+    if (current && knownBlocks.includes(current)) {
+      sel.value = current;
+    } else {
+      sel.value = "";
+    }
+  }
+
+  /** Tambah No Block baru ke daftar (lokal + sheet kolom H) */
+  async function addBlockToList(name) {
+    name = (name || "").trim();
+    if (!name) {
+      alert("Isi nama No Block terlebih dahulu.");
+      return false;
+    }
+    if (knownBlocks.includes(name)) {
+      setStatus("No Block \"" + name + "\" sudah ada di daftar.", "");
+      setSelectedBlock(name);
+      return false;
+    }
+
+    setStatus("Menyimpan No Block \"" + name + "\" ke sheet...", "");
+
+    // Kirim ke Google Sheet dulu (pakai text/plain agar CORS sederhana + bisa baca response jika deploy benar)
+    let sheetOk = false;
+    try {
+      const res = await fetch(GOOGLE_SCRIPT_URL, {
+        method: "POST",
+        redirect: "follow",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: "addBlock", blockNo: name })
+      });
+      // Apps Script web app sering redirect; coba parse JSON
+      try {
+        const data = await res.json();
+        sheetOk = !!(data && data.ok);
+      } catch (_) {
+        // no-cors / opaque — anggap terkirim
+        sheetOk = true;
+      }
+    } catch (err) {
+      console.warn("Gagal kirim No Block ke sheet:", err);
+      sheetOk = false;
+    }
+
+    knownBlocks.push(name);
+    knownBlocks.sort(naturalCompare);
+    localStorage.setItem("knownBlocks", JSON.stringify(knownBlocks));
+    updateBlockSelect();
+    setSelectedBlock(name);
+
+    const newInput = document.getElementById("newBlockInput");
+    if (newInput) newInput.value = "";
+
+    if (sheetOk) {
+      setStatus("No Block \"" + name + "\" ditambahkan ke daftar & Google Sheet.", "success-msg");
+    } else {
+      setStatus("No Block \"" + name + "\" disimpan lokal. Cek Apps Script / deploy jika tidak muncul di device lain.", "error-msg");
+    }
+    return true;
+  }
+
+  /** Hapus No Block dari daftar (lokal + sheet kolom H). Tidak menghapus data scan. */
+  async function removeBlockFromList(name) {
+    name = (name || "").trim();
+    if (!name) return false;
+
+    const ok = confirm(
+      "Hapus \"" + name + "\" dari daftar No Block?\n\n" +
+      "• Akan dihapus dari dropdown dan kolom H di Google Sheet\n" +
+      "• Data scan (barcode) yang sudah tercatat TIDAK dihapus"
+    );
+    if (!ok) return false;
+
+    knownBlocks = knownBlocks.filter(b => b !== name);
+    localStorage.setItem("knownBlocks", JSON.stringify(knownBlocks));
+    updateBlockSelect();
+
+    if (getBlockNo() === name) {
+      setSelectedBlock("");
+    }
+
+    try {
+      await fetch(GOOGLE_SCRIPT_URL, {
+        method: "POST",
+        redirect: "follow",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: "removeBlock", blockNo: name })
+      });
+      setStatus("No Block \"" + name + "\" dihapus dari daftar & sheet.", "success-msg");
+    } catch (err) {
+      console.warn("Gagal hapus No Block di sheet:", err);
+      setStatus("No Block \"" + name + "\" dihapus lokal (gagal sync ke sheet).", "error-msg");
+    }
+    return true;
+  }
+
+  function promptRemoveBlock() {
+    updateBlockSelect();
+    if (!knownBlocks.length) {
+      alert("Daftar No Block masih kosong.");
+      return;
+    }
+    const current = getBlockNo();
+    let target = current;
+    if (!target || !knownBlocks.includes(target)) {
+      const listText = knownBlocks.map((b, i) => (i + 1) + ". " + b).join("\n");
+      const answer = prompt(
+        "Daftar No Block:\n" + listText + "\n\nKetik nama No Block yang ingin dihapus dari daftar:",
+        knownBlocks[0]
+      );
+      if (answer === null) return;
+      target = String(answer).trim();
+    }
+    if (!target) {
+      alert("Nama No Block kosong.");
+      return;
+    }
+    if (!knownBlocks.includes(target)) {
+      alert("\"" + target + "\" tidak ada di daftar.");
+      return;
+    }
+    removeBlockFromList(target);
+  }
+
+  async function sendToGoogleSheet(barcode, time, isDuplicate, pic, blockNoVal) {
+    try {
+      await fetch(GOOGLE_SCRIPT_URL, {
+        method: "POST",
+        redirect: "follow",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          barcode: barcode,
+          time: time,
+          isDuplicate: isDuplicate,
+          pic: pic || "",
+          blockNo: blockNoVal || ""
+        })
+      });
+      return true;
+    } catch (err) {
+      console.error("Failed to send to Google Sheet:", err);
+      return false;
+    }
+  }
+
+  async function addBarcode(decodedText) {
+    const block = getBlockNo();
+    if (!block) {
+      setStatus("⚠ Isi / pilih No Block terlebih dahulu sebelum scan.", "error-msg");
+      return;
+    }
+
+    const exists = isDuplicate(decodedText);
+    const time = new Date().toLocaleString();
+    const pic = getPicName();
+
+    items.push({
+      barcode: decodedText,
+      time: time,
+      pic: pic,
+      blockNo: block
+    });
+    save();
+    updateBlockInfo();
+
+    const sent = await sendToGoogleSheet(decodedText, time, exists, pic, block);
+
+    if (exists) {
+      setStatus("⚠ DUPLICATE: " + decodedText + " (saved to Sheet)", "duplicate-msg");
+    } else if (sent) {
+      setStatus("✓ Scanned & sent to Sheet: " + decodedText, "success-msg");
+    } else {
+      setStatus("✓ Scanned locally, but failed to send to Sheet: " + decodedText, "error-msg");
+    }
+  }
+
+  function updateModeUI() {
+    document.getElementById("modeManual").classList.toggle("active", scanMode === "manual");
+    document.getElementById("modeAuto").classList.toggle("active", scanMode === "auto");
+  }
+
+  function setMode(mode) {
+    if (mode !== "manual" && mode !== "auto") return;
+    scanMode = mode;
+    localStorage.setItem("scanMode", scanMode);
+    updateModeUI();
+    if (mode !== "auto") autoRestartPending = false;
+  }
+
+  async function startScanner() {
+    if (scanning || isProcessingScan) return;
+
+    if (!getBlockNo()) {
+      setStatus("⚠ Pilih / isi No Block terlebih dahulu sebelum scan.", "error-msg");
+      alert("Pilih atau ketik No Block terlebih dahulu.\n(Ketik baru lalu tekan Enter untuk menambah ke daftar)");
+      return;
+    }
+
+    savePicName();
+    saveBlockNo();
+    if (!getPicName()) {
+      const proceed = confirm("PIC masih kosong. Lanjut scan tanpa mengisi?");
+      if (!proceed) return;
+    }
+
+    const reader = document.getElementById("reader");
+    reader.style.display = "block";
+    setStatus("Starting camera...", "");
+    isProcessingScan = false;
+
+    scanner = new Html5Qrcode("reader");
+
+    try {
+      await scanner.start(
+        { facingMode: "environment" },
+        {
+          fps: 10,
+          qrbox: { width: 280, height: 160 },
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.ITF,
+            Html5QrcodeSupportedFormats.QR_CODE
+          ]
+        },
+        async (decodedText) => {
+          if (isProcessingScan || !scanning) return;
+          const now = Date.now();
+          if (decodedText === lastScannedCode && (now - lastScanTime) < DEBOUNCE_MS) return;
+
+          isProcessingScan = true;
+          lastScannedCode = decodedText;
+          lastScanTime = now;
+
+          if (scanMode === "manual") {
+            await stopScanner();
+          } else {
+            autoRestartPending = true;
+            await stopScanner();
+          }
+
+          await addBarcode(decodedText);
+          isProcessingScan = false;
+
+          if (scanMode === "auto") {
+            setTimeout(() => {
+              if (autoRestartPending && scanMode === "auto") {
+                autoRestartPending = false;
+                startScanner();
+              }
+            }, 900);
+          }
+        },
+        () => {}
+      );
+
+      scanning = true;
+      document.getElementById("startBtn").textContent = "STOP SCANNER";
+      setStatus(
+        scanMode === "auto"
+          ? "Point camera at a barcode (Auto mode)"
+          : "Point camera at a barcode",
+        ""
+      );
+    } catch (err) {
+      reader.style.display = "none";
+      setStatus("Camera could not start. Check camera permission and use HTTPS.", "error-msg");
+      console.error(err);
+    }
+  }
+
+  async function stopScanner() {
+    if (!scanner || !scanning) return;
+    try { await scanner.stop(); } catch (e) {}
+    scanning = false;
+    if (!autoRestartPending) {
+      document.getElementById("startBtn").textContent = "Press to scan";
+      isProcessingScan = false;
+    }
+    document.getElementById("reader").style.display = "none";
+  }
+
+  document.getElementById("startBtn").addEventListener("click", () => {
+    if (scanning) {
+      autoRestartPending = false;
+      isProcessingScan = false;
+      stopScanner();
+    } else {
+      startScanner();
+    }
+  });
+
+  document.getElementById("modeManual").addEventListener("click", () => setMode("manual"));
+  document.getElementById("modeAuto").addEventListener("click", () => setMode("auto"));
+
+  // Help modal
+  const helpModal = document.getElementById("helpModal");
+  document.getElementById("helpBtn").addEventListener("click", () => helpModal.classList.add("show"));
+  document.getElementById("helpClose").addEventListener("click", () => helpModal.classList.remove("show"));
+  helpModal.addEventListener("click", (e) => {
+    if (e.target === helpModal) helpModal.classList.remove("show");
+  });
+
+  let sortAsc = true;
+  function sortItems() {
+    const block = getBlockNo();
+    if (!block) {
+      alert("Pilih / isi No Block terlebih dahulu.");
+      return;
+    }
+    const blockItems = getBlockItems();
+    if (!blockItems.length) {
+      alert("Belum ada barcode untuk diurutkan di No Block ini.");
+      return;
+    }
+    const didAsc = sortAsc;
+    const other = items.filter(x => (x.blockNo || "") !== block);
+    const sorted = blockItems.slice().sort((a, b) => {
+      const cmp = naturalCompare(a.barcode, b.barcode);
+      return didAsc ? cmp : -cmp;
+    });
+    items = other.concat(sorted);
+    sortAsc = !sortAsc;
+    save();
+    setStatus(
+      didAsc
+        ? "Diurutkan A→Z (klik SORT lagi untuk Z→A)"
+        : "Diurutkan Z→A (klik SORT lagi untuk A→Z)",
+      "success-msg"
+    );
+  }
+  document.getElementById("sortBtn").addEventListener("click", sortItems);
+
+  // Clear: current No Block or all
+  document.getElementById("clearBtn").addEventListener("click", () => {
+    if (!items.length) {
+      alert("Tidak ada data untuk di-clear.");
+      return;
+    }
+    const block = getBlockNo();
+    const blockCount = block ? getBlockItems().length : 0;
+    const total = items.length;
+
+    if (block && blockCount > 0) {
+      const onlyThis = confirm(
+        "Clear data di perangkat ini?\n\n" +
+        "• OK  → Clear HANYA No Block \"" + block + "\" (" + blockCount + " item)\n" +
+        "• Cancel → pilih opsi lain (semua / batal)"
+      );
+      if (onlyThis) {
+        items = items.filter(x => (x.blockNo || "") !== block);
+        save();
+        updateBlockInfo();
+        setStatus("Cleared No Block \"" + block + "\" (lokal). Sheet tidak dihapus.", "success-msg");
+        return;
+      }
+    }
+
+    const clearAll = confirm(
+      "Clear SEMUA No Block di perangkat ini? (" + total + " item)\n\n" +
+      "OK = Clear semua\nCancel = Batal\n\n(Data di Google Sheet tidak dihapus)"
+    );
+    if (clearAll) {
+      items = [];
+      save();
+      updateBlockInfo();
+      setStatus("Semua data lokal di-clear.", "success-msg");
+    }
+  });
+
+  // Export Excel: 1 sheet per No Block
+  document.getElementById("exportBtn").addEventListener("click", () => {
+    if (!items.length) {
+      alert("Belum ada barcode yang di-scan untuk di-export.");
+      return;
+    }
+
+    // Kumpulkan semua No Block unik (dari data + knownBlocks)
+    const blockSet = new Set();
+    items.forEach(x => { if (x.blockNo) blockSet.add(x.blockNo); });
+    knownBlocks.forEach(b => blockSet.add(b));
+    const blockNames = Array.from(blockSet).filter(Boolean).sort(naturalCompare);
+
+    if (typeof XLSX !== "undefined") {
+      const wb = XLSX.utils.book_new();
+      blockNames.forEach(bName => {
+        const blockItems = items.filter(x => (x.blockNo || "") === bName);
+        const aoa = [
+          ["No.", "Barcode / Sample ID", "PIC", "No Block", "Time"],
+          ...blockItems.map((x, i) => [
+            i + 1,
+            x.barcode || "",
+            x.pic || "",
+            x.blockNo || "",
+            x.time || ""
+          ])
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws["!cols"] = [{ wch: 6 }, { wch: 22 }, { wch: 18 }, { wch: 16 }, { wch: 22 }];
+        // Nama sheet max 31 karakter, aman untuk No Block
+        const sheetName = String(bName).slice(0, 31) || "Sheet";
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      });
+      // Jika tidak ada block sama sekali, buat sheet kosong
+      if (!blockNames.length) {
+        const ws = XLSX.utils.aoa_to_sheet([["No.", "Barcode / Sample ID", "PIC", "No Block", "Time"]]);
+        XLSX.utils.book_append_sheet(wb, ws, "Data");
+      }
+      const fname = "scanned_barcodes_" + new Date().toISOString().slice(0, 10) + ".xlsx";
+      XLSX.writeFile(wb, fname);
+      setStatus("Export Excel berhasil: " + fname + " (" + blockNames.length + " sheet)", "success-msg");
+    } else {
+      // Fallback CSV dikelompokkan per No Block
+      const lines = [];
+      blockNames.forEach(bName => {
+        const blockItems = items.filter(x => (x.blockNo || "") === bName);
+        lines.push('"=== ' + bName + ' ==="');
+        lines.push('"No.","Barcode","PIC","No Block","Time"');
+        blockItems.forEach((x, i) => {
+          lines.push(
+            [i + 1, x.barcode, x.pic || "", x.blockNo || "", x.time || ""]
+              .map(v => '"' + String(v).replace(/"/g, '""') + '"')
+              .join(",")
+          );
+        });
+        lines.push("");
+      });
+      const csv = lines.join("\r\n");
+      const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "scanned_barcodes_by_block_" + new Date().toISOString().slice(0, 10) + ".csv";
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatus("Export CSV (per No Block) berhasil.", "success-msg");
+    }
+  });
+
+  // Ambil daftar No Block dari sheet (kolom H) via Apps Script
+  async function fetchBlocksFromSheet() {
+    try {
+      const url = GOOGLE_SCRIPT_URL + (GOOGLE_SCRIPT_URL.includes("?") ? "&" : "?") + "action=blocks";
+      const res = await fetch(url, { method: "GET", redirect: "follow" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      if (data && Array.isArray(data.blocks)) {
+        data.blocks.forEach(b => {
+          const name = String(b || "").trim();
+          if (name && !knownBlocks.includes(name)) knownBlocks.push(name);
+        });
+        knownBlocks.sort(naturalCompare);
+        localStorage.setItem("knownBlocks", JSON.stringify(knownBlocks));
+        updateBlockSelect();
+        return true;
+      }
+    } catch (err) {
+      console.warn("Tidak bisa ambil daftar No Block dari Sheet (cek deploy Apps Script action=blocks):", err);
+    }
+    updateBlockSelect();
+    return false;
+  }
+
+  /**
+   * Muat hasil scan HARI INI untuk satu No Block dari Google Sheet.
+   * Data hari sebelumnya tidak ikut ditarik (meski No Block sama).
+   */
+  async function loadScansForBlock(blockName) {
+    blockName = (blockName || "").trim();
+    if (!blockName) return 0;
+
+    try {
+      const url = GOOGLE_SCRIPT_URL
+        + (GOOGLE_SCRIPT_URL.includes("?") ? "&" : "?")
+        + "action=scans&block=" + encodeURIComponent(blockName)
+        + "&today=1";
+      const res = await fetch(url, { method: "GET", redirect: "follow" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      if (!data || !Array.isArray(data.rows)) return 0;
+
+      // Hanya barcode hari ini yang sudah ada di lokal untuk block ini
+      const existing = new Set(
+        items
+          .filter(x => (x.blockNo || "") === blockName && isTodayTime(x.time))
+          .map(x => x.barcode)
+      );
+      let added = 0;
+      data.rows.forEach(row => {
+        const bc = String(row.barcode || row.sampleId || "").trim();
+        const time = row.time || "";
+        // Client-side guard: abaikan jika bukan hari ini
+        if (!bc || existing.has(bc)) return;
+        if (time && !isTodayTime(time)) return;
+        // Jika server tidak kirim time, anggap hari ini (karena minta today=1)
+        items.push({
+          barcode: bc,
+          pic: row.pic || "",
+          blockNo: blockName,
+          time: time || new Date().toLocaleString()
+        });
+        existing.add(bc);
+        added++;
+      });
+      if (added) {
+        localStorage.setItem("barcodeItems", JSON.stringify(items));
+      }
+      return added;
+    } catch (err) {
+      console.warn("Gagal load scans dari Sheet untuk", blockName, err);
+      return 0;
+    }
+  }
+
+  /** Hapus cache lokal untuk No Block ini yang BUKAN hari ini (hemat storage) */
+  function purgeOldLocalForBlock(blockName) {
+    if (!blockName) return;
+    const before = items.length;
+    items = items.filter(x => {
+      if ((x.blockNo || "") !== blockName) return true;
+      return isTodayTime(x.time);
+    });
+    if (items.length !== before) {
+      localStorage.setItem("barcodeItems", JSON.stringify(items));
+    }
+  }
+
+  async function onBlockSelected() {
+    saveBlockNo();
+    const block = getBlockNo();
+    if (!block) {
+      updateBlockInfo();
+      render();
+      return;
+    }
+    // Buang data lokal kemarin (No Block sama) supaya tidak ikut tampil
+    purgeOldLocalForBlock(block);
+    setStatus("Memuat data hari ini \"" + block + "\" dari Google Sheet...", "");
+    const added = await loadScansForBlock(block);
+    updateBlockInfo();
+    render();
+    if (added > 0) {
+      setStatus("Loaded " + added + " barcode HARI INI dari Sheet untuk \"" + block + "\".", "success-msg");
+    } else {
+      setStatus("No Block \"" + block + "\" siap. Belum ada scan hari ini dari Sheet.", "");
+    }
+  }
+
+  // Init PIC
+  const picInput = document.getElementById("picInput");
+  if (picInput) {
+    picInput.value = picName;
+    picInput.classList.toggle("field-empty", !picName);
+    picInput.addEventListener("input", savePicName);
+    picInput.addEventListener("change", savePicName);
+  }
+
+  // Dropdown No Block (pilih saja)
+  const blockSelect = document.getElementById("blockSelect");
+  if (blockSelect) {
+    blockSelect.addEventListener("change", () => {
+      onBlockSelected();
+    });
+  }
+
+  // Tombol Tambah No Block
+  const addBlockBtn = document.getElementById("addBlockBtn");
+  const newBlockInput = document.getElementById("newBlockInput");
+  if (addBlockBtn) {
+    addBlockBtn.addEventListener("click", async () => {
+      const val = newBlockInput ? newBlockInput.value.trim() : "";
+      await addBlockToList(val);
+    });
+  }
+  if (newBlockInput) {
+    newBlockInput.addEventListener("keydown", async (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const val = newBlockInput.value.trim();
+        await addBlockToList(val);
+      }
+    });
+  }
+
+  // Tombol Hapus List No Block
+  const removeBlockBtn = document.getElementById("removeBlockBtn");
+  if (removeBlockBtn) {
+    removeBlockBtn.addEventListener("click", promptRemoveBlock);
+  }
+
+  updateModeUI();
+  updateBlockSelect();
+  render();
+  updateBlockInfo();
+
+  // Sync daftar No Block + (jika ada) data scan dari Sheet
+  (async function initFromSheet() {
+    setStatus("Sinkronisasi daftar No Block dari Google Sheet...", "");
+    await fetchBlocksFromSheet();
+    if (blockNo) {
+      setSelectedBlock(blockNo);
+      await onBlockSelected();
+    } else {
+      setStatus("Ready to scan", "");
+    }
+  })();
+</script>
+</body>
+</html>
