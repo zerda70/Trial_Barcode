@@ -147,7 +147,7 @@
 <body>
 <div class="container">
   <div class="header">
-    <img src="logo.png" alt="Assay Laboratory Logo">
+    <img src="logo.png" alt="Assay Laboratory Logo" onerror="this.style.display='none'">
     <h1>Assay Lab Barcode Scanner</h1>
   </div>
 
@@ -298,68 +298,81 @@
     render();
   }
 
+  /** Kunci hari lokal: "2026-11-05" */
+  function todayKey() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + d;
+  }
+
+  /** Apakah item termasuk hari ini (pakai dayKey dulu, lalu parse time) */
+  function isItemToday(item) {
+    if (!item) return false;
+    if (item.dayKey) return item.dayKey === todayKey();
+    return isTodayTime(item.time);
+  }
+
   /** Apakah string waktu berasal dari hari ini (lokal device) */
   function isTodayTime(timeStr) {
-    if (!timeStr) return false;
+    if (!timeStr) return true; // tanpa waktu → anggap hari ini (sheet harian)
     const s = String(timeStr).trim();
     const now = new Date();
     const y = now.getFullYear();
     const m = now.getMonth() + 1;
     const d = now.getDate();
 
-    // Format umum dari sheet / toLocaleString: "4/11/2026, 03.37.39" atau "4/11/2026, 3:37:39"
-    // juga "11/4/2026..." tergantung locale
-    const datePart = s.split(",")[0].trim();
+    function matchYMD(year, month, day) {
+      return year === y && month === m && day === d;
+    }
+
+    // Native Date — menangani "Thu Nov 05 2026 04:42:21 GMT+0700 ..."
+    const native = new Date(s);
+    if (!isNaN(native.getTime())) {
+      if (matchYMD(native.getFullYear(), native.getMonth() + 1, native.getDate())) return true;
+    }
+
+    // ISO yyyy-mm-dd
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+      const dt = new Date(s);
+      if (!isNaN(dt.getTime()) && matchYMD(dt.getFullYear(), dt.getMonth() + 1, dt.getDate())) {
+        return true;
+      }
+    }
+
+    // Bagian tanggal saja (sebelum koma / spasi jam)
+    const datePart = s.split(",")[0].trim().split(/\s+/)[0].trim();
     const parts = datePart.split(/[\/\-\.]/).map(p => parseInt(p, 10)).filter(n => !isNaN(n));
     if (parts.length < 3) {
-      // coba Date parse native
-      const dt = new Date(s);
-      if (!isNaN(dt.getTime())) {
-        return dt.getFullYear() === y && dt.getMonth() + 1 === m && dt.getDate() === d;
-      }
+      return true; // jangan sembunyikan jika format tidak dikenali
+    }
+
+    const a = parts[0], b = parts[1], c = parts[2];
+    if (c >= 1000) {
+      // a/b/yyyy — coba D/M/Y DAN M/D/Y (perbaiki 11/5/2026 = 5 Nov US)
+      if (matchYMD(c, b, a)) return true; // d/m/Y
+      if (matchYMD(c, a, b)) return true; // m/d/Y
       return false;
     }
-    let day, month, year;
-    // Jika bagian ketiga 4 digit = tahun → d/m/Y atau m/d/Y
-    if (parts[2] >= 1000) {
-      year = parts[2];
-      // Heuristik: jika parts[0] > 12 → pasti day/month/year
-      if (parts[0] > 12) {
-        day = parts[0];
-        month = parts[1];
-      } else if (parts[1] > 12) {
-        month = parts[0];
-        day = parts[1];
-      } else {
-        // Ambigu: anggap d/m/Y (format Indonesia)
-        day = parts[0];
-        month = parts[1];
-      }
-    } else if (parts[0] >= 1000) {
-      // Y-m-d
-      year = parts[0];
-      month = parts[1];
-      day = parts[2];
-    } else {
-      return false;
+    if (a >= 1000) {
+      return matchYMD(a, b, c); // yyyy-m-d
     }
-    return year === y && month === m && day === d;
+    return true;
   }
 
   function getBlockItems() {
     const block = getBlockNo();
     if (!block) return [];
-    // Hanya tampilkan scan HARI INI untuk No Block ini
-    return items.filter(x => (x.blockNo || "") === block && isTodayTime(x.time));
+    return items.filter(x => (x.blockNo || "") === block && isItemToday(x));
   }
 
   function isDuplicate(barcode) {
     const block = getBlockNo();
-    // Duplikat hanya dihitung dalam No Block yang sama & HARI INI
     return items.some(x =>
       x.barcode === barcode &&
       (x.blockNo || "") === block &&
-      isTodayTime(x.time)
+      isItemToday(x)
     );
   }
 
@@ -607,10 +620,12 @@
     const exists = isDuplicate(decodedText);
     const time = new Date().toLocaleString();
     const pic = getPicName();
+    const day = todayKey();
 
     items.push({
       barcode: decodedText,
       time: time,
+      dayKey: day,
       pic: pic,
       blockNo: block
     });
@@ -920,42 +935,44 @@
   }
 
   /**
-   * Muat hasil scan HARI INI untuk satu No Block dari Google Sheet.
-   * Data hari sebelumnya tidak ikut ditarik (meski No Block sama).
+   * Muat hasil scan untuk satu No Block dari spreadsheet HARI INI (file harian).
+   * Semua baris di file harian = data hari ini, jadi tidak difilter ulang ketat.
    */
   async function loadScansForBlock(blockName) {
     blockName = (blockName || "").trim();
     if (!blockName) return 0;
 
     try {
+      // today=0: ambil semua baris No Block ini di file harian (file sudah per-hari)
       const url = GOOGLE_SCRIPT_URL
         + (GOOGLE_SCRIPT_URL.includes("?") ? "&" : "?")
         + "action=scans&block=" + encodeURIComponent(blockName)
-        + "&today=1";
+        + "&today=0";
       const res = await fetch(url, { method: "GET", redirect: "follow" });
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
-      if (!data || !Array.isArray(data.rows)) return 0;
+      if (!data || !Array.isArray(data.rows)) {
+        console.warn("loadScans: respons tidak berisi rows", data);
+        return 0;
+      }
 
-      // Hanya barcode hari ini yang sudah ada di lokal untuk block ini
+      const day = todayKey();
       const existing = new Set(
         items
-          .filter(x => (x.blockNo || "") === blockName && isTodayTime(x.time))
+          .filter(x => (x.blockNo || "") === blockName && isItemToday(x))
           .map(x => x.barcode)
       );
       let added = 0;
       data.rows.forEach(row => {
         const bc = String(row.barcode || row.sampleId || "").trim();
-        const time = row.time || "";
-        // Client-side guard: abaikan jika bukan hari ini
         if (!bc || existing.has(bc)) return;
-        if (time && !isTodayTime(time)) return;
-        // Jika server tidak kirim time, anggap hari ini (karena minta today=1)
+        const time = row.time || new Date().toLocaleString();
         items.push({
           barcode: bc,
           pic: row.pic || "",
           blockNo: blockName,
-          time: time || new Date().toLocaleString()
+          time: time,
+          dayKey: day
         });
         existing.add(bc);
         added++;
@@ -970,13 +987,13 @@
     }
   }
 
-  /** Hapus cache lokal untuk No Block ini yang BUKAN hari ini (hemat storage) */
+  /** Hapus cache lokal untuk No Block ini yang BUKAN hari ini */
   function purgeOldLocalForBlock(blockName) {
     if (!blockName) return;
     const before = items.length;
     items = items.filter(x => {
       if ((x.blockNo || "") !== blockName) return true;
-      return isTodayTime(x.time);
+      return isItemToday(x);
     });
     if (items.length !== before) {
       localStorage.setItem("barcodeItems", JSON.stringify(items));
@@ -991,16 +1008,15 @@
       render();
       return;
     }
-    // Buang data lokal kemarin (No Block sama) supaya tidak ikut tampil
     purgeOldLocalForBlock(block);
-    setStatus("Memuat data hari ini \"" + block + "\" dari Google Sheet...", "");
+    setStatus("Memuat data \"" + block + "\" dari Google Sheet hari ini...", "");
     const added = await loadScansForBlock(block);
     updateBlockInfo();
     render();
     if (added > 0) {
-      setStatus("Loaded " + added + " barcode HARI INI dari Sheet untuk \"" + block + "\".", "success-msg");
+      setStatus("Loaded " + added + " barcode dari Sheet untuk \"" + block + "\".", "success-msg");
     } else {
-      setStatus("No Block \"" + block + "\" siap. Belum ada scan hari ini dari Sheet.", "");
+      setStatus("No Block \"" + block + "\" siap. Scan baru akan muncul di sini.", "");
     }
   }
 
