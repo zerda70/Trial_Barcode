@@ -298,19 +298,34 @@
     render();
   }
 
-  /** Kunci hari lokal: "2026-11-05" */
-  function todayKey() {
+  /**
+   * Kunci shift lokal — selaras backend & nama file Excel:
+   * dd-mm-yyyy-DS (06:00–17:59) | dd-mm-yyyy-NS (18:00–05:59)
+   * NS jam 00–05 memakai tanggal kemarin.
+   */
+  function shiftKey() {
     const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    const d = String(now.getDate()).padStart(2, "0");
-    return y + "-" + m + "-" + d;
+    const hour = now.getHours();
+    const shift = (hour >= 6 && hour < 18) ? "DS" : "NS";
+    const ref = new Date(now.getTime());
+    if (shift === "NS" && hour < 6) ref.setDate(ref.getDate() - 1);
+    const dd = String(ref.getDate()).padStart(2, "0");
+    const mm = String(ref.getMonth() + 1).padStart(2, "0");
+    const yyyy = ref.getFullYear();
+    return dd + "-" + mm + "-" + yyyy + "-" + shift;
   }
 
-  /** Apakah item termasuk hari ini (pakai dayKey dulu, lalu parse time) */
+  /** Alias kompatibilitas */
+  function todayKey() {
+    return shiftKey();
+  }
+
+  /** Apakah item termasuk shift saat ini */
   function isItemToday(item) {
     if (!item) return false;
-    if (item.dayKey) return item.dayKey === todayKey();
+    const current = shiftKey();
+    if (item.shiftKey) return item.shiftKey === current;
+    if (item.dayKey) return item.dayKey === current;
     return isTodayTime(item.time);
   }
 
@@ -424,10 +439,52 @@
     });
   }
 
-  window.removeItem = function(index) {
+  window.removeItem = async function(index) {
+    if (index < 0 || index >= items.length) return;
+    const item = items[index];
+    if (!item) return;
+
+    const ok = confirm(
+      "Hapus barcode \"" + item.barcode + "\"?\n\n" +
+      "Data akan dihapus dari daftar di web DAN dari Google Sheet hari ini."
+    );
+    if (!ok) return;
+
+    // Hapus lokal dulu agar UI langsung update
     items.splice(index, 1);
     save();
     updateBlockInfo();
+
+    // Hapus di Google Sheet (file harian)
+    try {
+      setStatus("Menghapus \"" + item.barcode + "\" dari Google Sheet...", "");
+      const res = await fetch(GOOGLE_SCRIPT_URL, {
+        method: "POST",
+        redirect: "follow",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "deleteScan",
+          barcode: item.barcode || "",
+          blockNo: item.blockNo || ""
+        })
+      });
+      let sheetOk = true;
+      try {
+        const data = await res.json();
+        sheetOk = !!(data && data.ok);
+      } catch (_) {
+        // opaque response — anggap terkirim
+        sheetOk = true;
+      }
+      if (sheetOk) {
+        setStatus("Barcode \"" + item.barcode + "\" dihapus dari web & Sheet.", "success-msg");
+      } else {
+        setStatus("Dihapus di web, tetapi gagal hapus di Sheet (bisa muncul lagi saat sync).", "error-msg");
+      }
+    } catch (err) {
+      console.warn("Gagal hapus scan di Sheet:", err);
+      setStatus("Dihapus di web, tetapi gagal hubungi Sheet.", "error-msg");
+    }
   };
 
   function updateBlockInfo() {
@@ -451,11 +508,10 @@
   function updateBlockSelect() {
     const sel = document.getElementById("blockSelect");
     if (!sel) return;
+    // Dropdown HANYA dari knownBlocks (sheet + yang ditambah manual).
+    // Jangan isi ulang dari items — supaya "Hapus List" benar-benar hilang dari dropdown.
     const current = getBlockNo() || blockNo;
-    const set = new Set(knownBlocks);
-    items.forEach(it => { if (it.blockNo) set.add(it.blockNo); });
-    if (current) set.add(current);
-    knownBlocks = Array.from(set).filter(Boolean).sort(naturalCompare);
+    knownBlocks = Array.from(new Set(knownBlocks.filter(Boolean))).sort(naturalCompare);
     localStorage.setItem("knownBlocks", JSON.stringify(knownBlocks));
 
     sel.innerHTML = '<option value="">— Pilih No Block —</option>';
@@ -469,6 +525,10 @@
       sel.value = current;
     } else {
       sel.value = "";
+      if (current && !knownBlocks.includes(current)) {
+        blockNo = "";
+        localStorage.setItem("blockNo", "");
+      }
     }
   }
 
@@ -526,7 +586,7 @@
     return true;
   }
 
-  /** Hapus No Block dari daftar (lokal + sheet kolom H). Tidak menghapus data scan. */
+  /** Hapus No Block dari daftar (lokal + sheet kolom H). Tidak menghapus data scan di sheet. */
   async function removeBlockFromList(name) {
     name = (name || "").trim();
     if (!name) return false;
@@ -534,17 +594,29 @@
     const ok = confirm(
       "Hapus \"" + name + "\" dari daftar No Block?\n\n" +
       "• Akan dihapus dari dropdown dan kolom H di Google Sheet\n" +
-      "• Data scan (barcode) yang sudah tercatat TIDAK dihapus"
+      "• Data scan di Google Sheet TIDAK dihapus\n" +
+      "• Cache scan lokal untuk No Block ini akan dikosongkan di perangkat ini"
     );
     if (!ok) return false;
 
+    // Hapus dari daftar dropdown
     knownBlocks = knownBlocks.filter(b => b !== name);
     localStorage.setItem("knownBlocks", JSON.stringify(knownBlocks));
-    updateBlockSelect();
 
-    if (getBlockNo() === name) {
-      setSelectedBlock("");
+    // Kosongkan cache lokal untuk No Block ini (supaya tidak ikut ter-recall di device ini)
+    items = items.filter(x => (x.blockNo || "") !== name);
+    localStorage.setItem("barcodeItems", JSON.stringify(items));
+
+    if (getBlockNo() === name || blockNo === name) {
+      blockNo = "";
+      localStorage.setItem("blockNo", "");
+      const sel = document.getElementById("blockSelect");
+      if (sel) sel.value = "";
     }
+
+    updateBlockSelect();
+    updateBlockInfo();
+    render();
 
     try {
       await fetch(GOOGLE_SCRIPT_URL, {
@@ -553,6 +625,7 @@
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify({ action: "removeBlock", blockNo: name })
       });
+      // Jangan fetchBlocks segera — biar sheet sempat ter-update; daftar lokal sudah tanpa name
       setStatus("No Block \"" + name + "\" dihapus dari daftar & sheet.", "success-msg");
     } catch (err) {
       console.warn("Gagal hapus No Block di sheet:", err);
@@ -620,12 +693,13 @@
     const exists = isDuplicate(decodedText);
     const time = new Date().toLocaleString();
     const pic = getPicName();
-    const day = todayKey();
+    const sk = shiftKey();
 
     items.push({
       barcode: decodedText,
       time: time,
-      dayKey: day,
+      shiftKey: sk,
+      dayKey: sk,
       pic: pic,
       blockNo: block
     });
@@ -841,6 +915,28 @@
     }
   });
 
+  /**
+   * Nama file export / selaras dengan sheet harian per shift:
+   * - DS: 06:00–17:59 → dd-mm-yyyy-DS (tanggal hari ini)
+   * - NS: 18:00–05:59 → dd-mm-yyyy-NS
+   *   (jam 18–23 pakai tanggal hari ini; jam 00–05 pakai tanggal kemarin
+   *    supaya satu shift NS tidak terpecah dua file)
+   */
+  function getExportFileName() {
+    const now = new Date();
+    const hour = now.getHours();
+    const shift = (hour >= 6 && hour < 18) ? "DS" : "NS";
+    // Untuk NS dini hari (00:00–05:59), tanggal = kemarin (awal shift)
+    const ref = new Date(now.getTime());
+    if (shift === "NS" && hour < 6) {
+      ref.setDate(ref.getDate() - 1);
+    }
+    const dd = String(ref.getDate()).padStart(2, "0");
+    const mm = String(ref.getMonth() + 1).padStart(2, "0");
+    const yyyy = ref.getFullYear();
+    return dd + "-" + mm + "-" + yyyy + "-" + shift + ".xlsx";
+  }
+
   // Export Excel: 1 sheet per No Block
   document.getElementById("exportBtn").addEventListener("click", () => {
     if (!items.length) {
@@ -848,16 +944,16 @@
       return;
     }
 
-    // Kumpulkan semua No Block unik (dari data + knownBlocks)
+    // Kumpulkan No Block dari data hari ini + knownBlocks
     const blockSet = new Set();
-    items.forEach(x => { if (x.blockNo) blockSet.add(x.blockNo); });
+    items.forEach(x => { if (x.blockNo && isItemToday(x)) blockSet.add(x.blockNo); });
     knownBlocks.forEach(b => blockSet.add(b));
     const blockNames = Array.from(blockSet).filter(Boolean).sort(naturalCompare);
 
     if (typeof XLSX !== "undefined") {
       const wb = XLSX.utils.book_new();
       blockNames.forEach(bName => {
-        const blockItems = items.filter(x => (x.blockNo || "") === bName);
+        const blockItems = items.filter(x => (x.blockNo || "") === bName && isItemToday(x));
         const aoa = [
           ["No.", "Barcode / Sample ID", "PIC", "No Block", "Time"],
           ...blockItems.map((x, i) => [
@@ -870,16 +966,14 @@
         ];
         const ws = XLSX.utils.aoa_to_sheet(aoa);
         ws["!cols"] = [{ wch: 6 }, { wch: 22 }, { wch: 18 }, { wch: 16 }, { wch: 22 }];
-        // Nama sheet max 31 karakter, aman untuk No Block
         const sheetName = String(bName).slice(0, 31) || "Sheet";
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
       });
-      // Jika tidak ada block sama sekali, buat sheet kosong
       if (!blockNames.length) {
         const ws = XLSX.utils.aoa_to_sheet([["No.", "Barcode / Sample ID", "PIC", "No Block", "Time"]]);
         XLSX.utils.book_append_sheet(wb, ws, "Data");
       }
-      const fname = "scanned_barcodes_" + new Date().toISOString().slice(0, 10) + ".xlsx";
+      const fname = getExportFileName();
       XLSX.writeFile(wb, fname);
       setStatus("Export Excel berhasil: " + fname + " (" + blockNames.length + " sheet)", "success-msg");
     } else {
@@ -903,10 +997,10 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "scanned_barcodes_by_block_" + new Date().toISOString().slice(0, 10) + ".csv";
+      a.download = getExportFileName().replace(/\.xlsx$/i, ".csv");
       a.click();
       URL.revokeObjectURL(url);
-      setStatus("Export CSV (per No Block) berhasil.", "success-msg");
+      setStatus("Export CSV berhasil: " + a.download, "success-msg");
     }
   });
 
@@ -956,7 +1050,7 @@
         return 0;
       }
 
-      const day = todayKey();
+      const sk = shiftKey();
       const existing = new Set(
         items
           .filter(x => (x.blockNo || "") === blockName && isItemToday(x))
@@ -972,7 +1066,8 @@
           pic: row.pic || "",
           blockNo: blockName,
           time: time,
-          dayKey: day
+          shiftKey: sk,
+          dayKey: sk
         });
         existing.add(bc);
         added++;
