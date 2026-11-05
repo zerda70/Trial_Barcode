@@ -937,74 +937,85 @@
     return dd + "-" + mm + "-" + yyyy + "-" + shift + ".xlsx";
   }
 
-  // Export Excel: 1 sheet per No Block
-  document.getElementById("exportBtn").addEventListener("click", () => {
-    if (!items.length) {
-      alert("Belum ada barcode yang di-scan untuk di-export.");
-      return;
-    }
+  // Export Excel: tarik SEMUA data shift ini dari Sheet dulu, lalu export
+  document.getElementById("exportBtn").addEventListener("click", async () => {
+    try {
+      setStatus("Menyiapkan export: memuat semua No Block dari Sheet...", "");
+      await loadAllScansFromSheet();
+      updateBlockInfo();
+      render();
 
-    // Kumpulkan No Block dari data hari ini + knownBlocks
-    const blockSet = new Set();
-    items.forEach(x => { if (x.blockNo && isItemToday(x)) blockSet.add(x.blockNo); });
-    knownBlocks.forEach(b => blockSet.add(b));
-    const blockNames = Array.from(blockSet).filter(Boolean).sort(naturalCompare);
+      const blockSet = new Set();
+      items.forEach(x => { if (x.blockNo && isItemToday(x)) blockSet.add(x.blockNo); });
+      knownBlocks.forEach(b => blockSet.add(b));
+      const blockNames = Array.from(blockSet).filter(Boolean).sort(naturalCompare);
 
-    if (typeof XLSX !== "undefined") {
-      const wb = XLSX.utils.book_new();
-      blockNames.forEach(bName => {
-        const blockItems = items.filter(x => (x.blockNo || "") === bName && isItemToday(x));
-        const aoa = [
-          ["No.", "Barcode / Sample ID", "PIC", "No Block", "Time"],
-          ...blockItems.map((x, i) => [
-            i + 1,
-            x.barcode || "",
-            x.pic || "",
-            x.blockNo || "",
-            x.time || ""
-          ])
-        ];
-        const ws = XLSX.utils.aoa_to_sheet(aoa);
-        ws["!cols"] = [{ wch: 6 }, { wch: 22 }, { wch: 18 }, { wch: 16 }, { wch: 22 }];
-        const sheetName = String(bName).slice(0, 31) || "Sheet";
-        XLSX.utils.book_append_sheet(wb, ws, sheetName);
-      });
-      if (!blockNames.length) {
-        const ws = XLSX.utils.aoa_to_sheet([["No.", "Barcode / Sample ID", "PIC", "No Block", "Time"]]);
-        XLSX.utils.book_append_sheet(wb, ws, "Data");
+      const hasData = items.some(x => isItemToday(x));
+      if (!hasData && !blockNames.length) {
+        alert("Belum ada barcode shift ini untuk di-export.");
+        setStatus("Tidak ada data untuk di-export.", "error-msg");
+        return;
       }
-      const fname = getExportFileName();
-      XLSX.writeFile(wb, fname);
-      setStatus("Export Excel berhasil: " + fname + " (" + blockNames.length + " sheet)", "success-msg");
-    } else {
-      // Fallback CSV dikelompokkan per No Block
-      const lines = [];
-      blockNames.forEach(bName => {
-        const blockItems = items.filter(x => (x.blockNo || "") === bName);
-        lines.push('"=== ' + bName + ' ==="');
-        lines.push('"No.","Barcode","PIC","No Block","Time"');
-        blockItems.forEach((x, i) => {
-          lines.push(
-            [i + 1, x.barcode, x.pic || "", x.blockNo || "", x.time || ""]
-              .map(v => '"' + String(v).replace(/"/g, '""') + '"')
-              .join(",")
-          );
+
+      if (typeof XLSX !== "undefined") {
+        const wb = XLSX.utils.book_new();
+        blockNames.forEach(bName => {
+          const blockItems = items.filter(x => (x.blockNo || "") === bName && isItemToday(x));
+          const aoa = [
+            ["No.", "Barcode / Sample ID", "PIC", "No Block", "Time"],
+            ...blockItems.map((x, i) => [
+              i + 1,
+              x.barcode || "",
+              x.pic || "",
+              x.blockNo || "",
+              x.time || ""
+            ])
+          ];
+          const ws = XLSX.utils.aoa_to_sheet(aoa);
+          ws["!cols"] = [{ wch: 6 }, { wch: 22 }, { wch: 18 }, { wch: 16 }, { wch: 22 }];
+          const sheetName = String(bName).slice(0, 31) || "Sheet";
+          XLSX.utils.book_append_sheet(wb, ws, sheetName);
         });
-        lines.push("");
-      });
-      const csv = lines.join("\r\n");
-      const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = getExportFileName().replace(/\.xlsx$/i, ".csv");
-      a.click();
-      URL.revokeObjectURL(url);
-      setStatus("Export CSV berhasil: " + a.download, "success-msg");
+        if (!blockNames.length) {
+          const ws = XLSX.utils.aoa_to_sheet([["No.", "Barcode / Sample ID", "PIC", "No Block", "Time"]]);
+          XLSX.utils.book_append_sheet(wb, ws, "Data");
+        }
+        const fname = getExportFileName();
+        XLSX.writeFile(wb, fname);
+        setStatus("Export Excel berhasil: " + fname + " (" + blockNames.length + " sheet)", "success-msg");
+      } else {
+        const lines = [];
+        blockNames.forEach(bName => {
+          const blockItems = items.filter(x => (x.blockNo || "") === bName && isItemToday(x));
+          lines.push('"=== ' + bName + ' ==="');
+          lines.push('"No.","Barcode","PIC","No Block","Time"');
+          blockItems.forEach((x, i) => {
+            lines.push(
+              [i + 1, x.barcode, x.pic || "", x.blockNo || "", x.time || ""]
+                .map(v => '"' + String(v).replace(/"/g, '""') + '"')
+                .join(",")
+            );
+          });
+          lines.push("");
+        });
+        const csv = lines.join("\r\n");
+        const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = getExportFileName().replace(/\.xlsx$/i, ".csv");
+        a.click();
+        URL.revokeObjectURL(url);
+        setStatus("Export CSV berhasil: " + a.download, "success-msg");
+      }
+    } catch (err) {
+      console.error(err);
+      setStatus("Gagal export: " + (err.message || err), "error-msg");
     }
   });
 
   // Ambil daftar No Block dari sheet (kolom H) via Apps Script
+  // Sheet = sumber kebenaran: block yang sudah dihapus di sheet hilang dari dropdown
   async function fetchBlocksFromSheet() {
     try {
       const url = GOOGLE_SCRIPT_URL + (GOOGLE_SCRIPT_URL.includes("?") ? "&" : "?") + "action=blocks";
@@ -1012,11 +1023,11 @@
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
       if (data && Array.isArray(data.blocks)) {
-        data.blocks.forEach(b => {
-          const name = String(b || "").trim();
-          if (name && !knownBlocks.includes(name)) knownBlocks.push(name);
-        });
-        knownBlocks.sort(naturalCompare);
+        const serverBlocks = data.blocks
+          .map(b => String(b || "").trim())
+          .filter(Boolean);
+        // Ganti daftar lokal dengan daftar server (agar Hapus List ikut ke device lain)
+        knownBlocks = Array.from(new Set(serverBlocks)).sort(naturalCompare);
         localStorage.setItem("knownBlocks", JSON.stringify(knownBlocks));
         updateBlockSelect();
         return true;
@@ -1029,15 +1040,14 @@
   }
 
   /**
-   * Muat hasil scan untuk satu No Block dari spreadsheet HARI INI (file harian).
-   * Semua baris di file harian = data hari ini, jadi tidak difilter ulang ketat.
+   * Muat hasil scan untuk satu No Block dari spreadsheet SHIFT saat ini.
+   * Sheet = sumber kebenaran: barcode yang dihapus di sheet ikut hilang di device ini.
    */
   async function loadScansForBlock(blockName) {
     blockName = (blockName || "").trim();
     if (!blockName) return 0;
 
     try {
-      // today=0: ambil semua baris No Block ini di file harian (file sudah per-hari)
       const url = GOOGLE_SCRIPT_URL
         + (GOOGLE_SCRIPT_URL.includes("?") ? "&" : "?")
         + "action=scans&block=" + encodeURIComponent(blockName)
@@ -1051,28 +1061,46 @@
       }
 
       const sk = shiftKey();
+      const sheetBarcodes = new Set();
+      const sheetRows = [];
+      data.rows.forEach(row => {
+        const bc = String(row.barcode || row.sampleId || "").trim();
+        if (!bc) return;
+        sheetBarcodes.add(bc);
+        sheetRows.push({
+          barcode: bc,
+          pic: row.pic || "",
+          blockNo: blockName,
+          time: row.time || new Date().toLocaleString(),
+          shiftKey: sk,
+          dayKey: sk
+        });
+      });
+
+      // Buang cache lokal shift ini untuk block ini yang sudah tidak ada di sheet
+      const before = items.length;
+      items = items.filter(x => {
+        if ((x.blockNo || "") !== blockName) return true;
+        if (!isItemToday(x)) return true; // shift lain biarkan
+        return sheetBarcodes.has(x.barcode);
+      });
+
+      // Tambah yang ada di sheet tapi belum di lokal
       const existing = new Set(
         items
           .filter(x => (x.blockNo || "") === blockName && isItemToday(x))
           .map(x => x.barcode)
       );
       let added = 0;
-      data.rows.forEach(row => {
-        const bc = String(row.barcode || row.sampleId || "").trim();
-        if (!bc || existing.has(bc)) return;
-        const time = row.time || new Date().toLocaleString();
-        items.push({
-          barcode: bc,
-          pic: row.pic || "",
-          blockNo: blockName,
-          time: time,
-          shiftKey: sk,
-          dayKey: sk
-        });
-        existing.add(bc);
+      sheetRows.forEach(row => {
+        if (existing.has(row.barcode)) return;
+        items.push(row);
+        existing.add(row.barcode);
         added++;
       });
-      if (added) {
+
+      const removed = before - (items.length - added);
+      if (added || removed) {
         localStorage.setItem("barcodeItems", JSON.stringify(items));
       }
       return added;
@@ -1080,6 +1108,16 @@
       console.warn("Gagal load scans dari Sheet untuk", blockName, err);
       return 0;
     }
+  }
+
+  /** Muat SEMUA scan shift ini untuk semua No Block (dipakai sebelum export) */
+  async function loadAllScansFromSheet() {
+    await fetchBlocksFromSheet();
+    let total = 0;
+    for (const b of knownBlocks.slice()) {
+      total += await loadScansForBlock(b);
+    }
+    return total;
   }
 
   /** Hapus cache lokal untuk No Block ini yang BUKAN hari ini */
